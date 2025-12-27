@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>The Withered's Attack 2: The Revenge</title>
+    <style>
+        :root { --fnaf-red: #8b0000; --fnaf-blue: #000033; }
+        * { box-sizing: border-box; touch-action: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+        body { background: #000; color: #fff; font-family: 'Courier New', monospace; margin: 0; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        
+        /* Contenedor 4:3 */
+        #game-viewport { 
+            position: relative; width: 1024px; height: 768px; 
+            max-width: 100vw; max-height: 75vw; /* Mantiene 4:3 en móviles */
+            background: #050505; border: 4px solid #1a1a1a; overflow: hidden;
+        }
+
+        .screen { display: none; width: 100%; height: 100%; position: absolute; flex-direction: column; }
+        .active { display: flex; }
+
+        /* HUD */
+        #hud { position: absolute; top: 10px; left: 10px; z-index: 100; pointer-events: none; text-shadow: 2px 2px #000; }
+        .danger-container { width: 200px; height: 15px; border: 1px solid #fff; background: #222; margin-top: 5px; }
+        #danger-bar { width: 0%; height: 100%; background: #f00; transition: width 0.3s; }
+
+        /* Estilos de Botones */
+        .btn-rect { width: 220px; height: 60px; background: rgba(50,50,50,0.8); border: 2px solid #fff; color: #fff; font-size: 18px; margin: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .btn-square { width: 80px; height: 80px; background: rgba(80,80,80,0.9); border: 2px solid #fff; font-size: 14px; }
+        .btn-mini { width: 40px; height: 40px; border: 1px solid #fff; font-size: 12px; }
+
+        /* Título */
+        .title-text { font-size: 60px; line-height: 0.9; text-align: left; padding: 40px; text-transform: uppercase; filter: blur(0.5px); animation: flicker 3s infinite; }
+        @keyframes flicker { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+
+        /* Controles Táctiles Abajo */
+        #touch-zone { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: space-around; padding: 0 20px; }
+        
+        /* Springlocks */
+        #springlock-grid { display: flex; justify-content: space-between; align-items: flex-end; height: 100%; padding: 50px; }
+
+        #jumpscare { display:none; position: fixed; top:0; left:0; width:100%; height:100%; background: red; z-index: 999; color: white; justify-content: center; align-items: center; font-size: 100px; }
+    </style>
+</head>
+<body>
+
+<div id="game-viewport">
+    <!-- HUD GLOBAL -->
+    <div id="hud">
+        <div id="instr">SISTEMA INICIALIZADO...</div>
+        DANGER: <div class="danger-container"><div id="danger-bar"></div></div>
+    </div>
+
+    <!-- PANTALLA DE TÍTULO -->
+    <div id="menu" class="screen active">
+        <div class="title-text">The<br>Withered's<br>Attack<br>2:The Revenge</div>
+        <div style="margin-left: 40px;">
+            <div class="btn-rect" onclick="startNight(1)">NIGHT 1</div>
+            <!-- Botones desbloqueables -->
+            <div class="btn-rect" id="night-6-btn" style="display:none" onclick="startNight(6)">NIGHT 6 (Desbloqueada)</div>
+            <div class="btn-rect" onclick="localStorage.clear(); location.reload()">BORRAR PROGRESO</div>
+            <div id="stars" style="color: gold; font-size: 30px; margin-top: 10px;"></div>
+        </div>
+    </div>
+
+    <!-- JUEGO PRINCIPAL -->
+    <div id="game-screen" class="screen">
+        <div id="room-display" style="text-align:center; font-size:24px; padding:20px; color:#555;">ELEVADOR</div>
+        
+        <div id="visual-content" style="flex:1; display:flex; justify-content:center; align-items:center;">
+            <!-- Contenido dinámico (Oficina, Conductos, etc.) -->
+             <div id="n3-minis" style="display:none; flex-wrap:wrap; width:300px; gap:5px;"></div>
+        </div>
+
+        <div id="touch-zone">
+            <!-- Botones dinámicos según la noche -->
+        </div>
+    </div>
+
+    <div id="jumpscare">JUMPSCARE!</div>
+</div>
+
+<script>
+    let currentNight = 1;
+    let dangerLevel = 0;
+    let nightTimer = 0;
+    let n3_sequence = [];
+    const N3_TARGET = [5,10,2,4,1,6,6,8,9,9,3];
+    let savedProgress = { lastCompleted: 0, stars: 0 }; // Objeto de guardado
+
+    // --- FUNCIONES DE GUARDADO Y CARGA (AÑADIDAS) ---
+    function saveProgress(nightNum) {
+        if (nightNum > savedProgress.lastCompleted) {
+            savedProgress.lastCompleted = nightNum;
+            if (nightNum === 5) savedProgress.stars = 1;
+            if (nightNum === 6) savedProgress.stars = 2;
+            localStorage.setItem('twa2_save_data', JSON.stringify(savedProgress));
+        }
+    }
+
+    function loadProgress() {
+        const savedData = localStorage.getItem('twa2_save_data');
+        if (savedData) {
+            savedProgress = JSON.parse(savedData);
+            document.getElementById('stars').innerText = "Estrellas: " + '⭐'.repeat(savedProgress.stars);
+            if (savedProgress.lastCompleted >= 5) {
+                document.getElementById('night-6-btn').style.display = 'flex';
+                document.getElementById('menu').querySelector('.btn-rect').innerText = "NIGHT " + (savedProgress.lastCompleted + 1);
+            }
+        }
+    }
+    window.onload = loadProgress; // Carga el progreso al iniciar
+
+    // --------------------------------------------------
+
+    function updateHUD(text, danger = null) {
+        document.getElementById('instr').innerText = text;
+        if (danger !== null) {
+            dangerLevel = danger;
+            document.getElementById('danger-bar').style.width = danger + "%";
+        }
+    }
+
+    function startNight(n) {
+        currentNight = n;
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById('game-screen').classList.add('active');
+        loadNightLogic();
+    }
+
+    function loadNightLogic() {
+        const zone = document.getElementById('touch-zone');
+        const room = document.getElementById('room-display');
+        zone.innerHTML = "";
+        
+        if (currentNight === 1) {
+            room.innerText = "ZONA DE VIGILANCIA";
+            updateHUD("Noche 1: Pulsa 'Left Duct' para entrar con Bonnie.");
+            zone.innerHTML = `<div class="btn-rect" onclick="enterBonnieRoom()">Left Duct</div>`;
+        }
+
+        if (currentNight === 2) {
+            room.innerText = "FREDDY'S CONTROL";
+            updateHUD("Danger: Not Dangerous", 0);
+            zone.innerHTML = `
+                <div class="btn-rect" id="btn-shock" onclick="freddyShock()">Controled Shock</div>
+                <div class="btn-rect" id="btn-desk" style="display:none" onmousedown="hideStart()" ontouchstart="hideStart()" onmouseup="hideEnd()" ontouchend="hideEnd()">Close Desk</div>
+            `;
+            runFreddyLogic();
+        }
+
+        if (currentNight === 4) {
+            room.innerText = "PARTS AND SERVICE (SPRINGLOCKS)";
+            zone.innerHTML = `
+                <div class="btn-square" onclick="turnSuit('L')">Turn Left</div>
+                <div class="btn-square" onclick="turnSuit('R')">Turn Right</div>
+            `;
+            updateHUD("Sobrevive 4 minutos...");
+            setTimeout(() => { 
+                alert("Job Completed"); 
+                saveProgress(4); // Guarda Noche 4 completada
+                startNight(5); 
+            }, 240000);
+        }
+    }
+
+    // --- NOCHE 1 ---
+    function enterBonnieRoom() {
+        document.getElementById('room-display').innerText = "BONNIE'S HIDE";
+        updateHUD("Usa Forward Slow o East (Rápido)");
+        document.getElementById('touch-zone').innerHTML = `
+            <div class="btn-rect" onclick="completeNight()">Next Room</div>
+            <div class="btn-square" onclick="moveBonnie('fast')">Go Forward East</div>
+            <div class="btn-square" onclick="moveBonnie('slow')">Go Forward Slow</div>
+        `;
+    }
+
+    function moveBonnie(speed) {
+        if (speed === 'fast' && Math.random() > 0.5) triggerJumpscare("Withered Bonnie escuchó tus pasos.");
+    }
+
+    // --- NOCHE 2 ---
+    let freddyState = 0;
+    function runFreddyLogic() {
+        let interval = setInterval(() => {
+            if(currentNight !== 2) clearInterval(interval);
+            freddyState++;
+            if (freddyState === 1) updateHUD("Danger: Extreme", 80);
+            if (freddyState === 3) {
+                updateHUD("Hide in the desk!");
+                document.getElementById('btn-shock').style.display = "none";
+                document.getElementById('btn-desk').style.display = "flex";
+            }
+        }, 5000);
+    }
+
+    function freddyShock() {
+        freddyState = 0;
+        updateHUD("Not Dangerous", 0);
+    }
+
+    function hideStart() { 
+        document.getElementById('btn-desk').style.marginLeft = "auto"; // Se mueve a la derecha
+    }
+    function hideEnd() {
+        document.getElementById('btn-desk').style.marginLeft = "0";
+    }
+
+    // --- NOCHE 6 ---
+    function startNight6() {
+        document.getElementById('room-display').innerText = "THE FACTORY - REPAIR ROOM";
+        updateHUD("Drawbler está activo. Vigila cámaras.");
+        // Simulación de sistema de cámaras básico
+    }
+
+    function triggerJumpscare(msg) {
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]); // Patrón de vibración
+        const j = document.getElementById('jumpscare');
+        j.style.display = "flex";
+        setTimeout(() => {
+            j.style.display = "none"; 
+            alert(msg + " Espere 10 segundos para regresar a la pantalla de título.");
+            setTimeout(() => location.reload(), 10000); // Vuelve al menú después de perder
+        }, 2000);
+    }
+    
+    function completeNight() {
+        alert("Job Completed! Guardando Noche " + currentNight);
+        saveProgress(currentNight); // Guarda automáticamente
+        if (currentNight < 6) {
+             startNight(currentNight + 1);
+        } else {
+            // Recarga el menú para mostrar las estrellas actualizadas
+            location.reload(); 
+        }
+    }
+
+    // Bloqueo de scroll para móvil
+    document.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+</script>
+</body>
+</html>
